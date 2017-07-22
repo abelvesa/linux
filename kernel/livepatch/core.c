@@ -179,7 +179,15 @@ static int klp_resolve_symbols(Elf_Shdr *relasec, struct module *pmod)
 	char objname[MODULE_NAME_LEN];
 	char symname[KSYM_NAME_LEN];
 	char *strtab = pmod->core_kallsyms.strtab;
-	Elf_Rela *relas;
+
+#ifdef CONFIG_MODULES_USE_ELF_RELA
+	Elf_Rela *relas = (Elf_Rela *) relasec->sh_addr;
+	int rela_type_size = sizeof(struct Elf_Rela *);
+#elif CONFIG_MODULES_USE_ELF_REL
+	Elf_Rel *relas = (Elf_Rel *) relasec->sh_addr;
+	int rela_type_size = sizeof(struct Elf_Rel *);
+#endif
+
 	Elf_Sym *sym;
 	unsigned long sympos, addr;
 
@@ -195,9 +203,8 @@ static int klp_resolve_symbols(Elf_Shdr *relasec, struct module *pmod)
 	 */
 	BUILD_BUG_ON(MODULE_NAME_LEN < 56 || KSYM_NAME_LEN != 128);
 
-	relas = (Elf_Rela *) relasec->sh_addr;
 	/* For each rela in this klp relocation section */
-	for (i = 0; i < relasec->sh_size / sizeof(Elf_Rela); i++) {
+	for (i = 0; i < relasec->sh_size / rela_type_size; i++) {
 		sym = pmod->core_kallsyms.symtab + ELF_R_SYM(relas[i].r_info);
 		if (sym->st_shndx != SHN_LIVEPATCH) {
 			pr_err("symbol %s is not marked as a livepatch symbol\n",
@@ -268,9 +275,15 @@ static int klp_write_object_relocations(struct module *pmod,
 		if (ret)
 			break;
 
-		ret = apply_relocate_add(pmod->klp_info->sechdrs,
-					 pmod->core_kallsyms.strtab,
-					 pmod->klp_info->symndx, i, pmod);
+		if (pmod->klp_info->sechdrs[i].sh_type == SHT_REL)
+			ret = apply_relocate(pmod->klp_info->sechdrs,
+					     pmod->core_kallsyms.strtab,
+					     pmod->klp_info->symndx, i, pmod);
+		else if (pmod->klp_info->sechdrs[i].sh_type == SHT_RELA)
+			ret = apply_relocate_add(pmod->klp_info->sechdrs,
+					     pmod->core_kallsyms.strtab,
+					     pmod->klp_info->symndx, i, pmod);
+
 		if (ret)
 			break;
 	}
