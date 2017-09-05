@@ -124,6 +124,8 @@
 	ldr	r1, [sp, #S_LR]			@ lr of instrumented func
 
 	ldr	lr, [sp, #S_PC]			@ get LR
+	mov	r4, lr				@ keep safe PC to check
+						@ for livepatch
 
 	mcount_adjust_addr	r0, lr		@ instrumented function
 
@@ -131,12 +133,25 @@
 ftrace_regs_call:
 	bl	ftrace_stub
 
+#ifdef CONFIG_LIVEPATCH
+	ldr	r0, [sp, #S_PC]			@ get PC
+	cmp	r0, r4
+	beq	ftrace_regs_caller_end		@ skip if PC is not modified
+	ldr	r0, [sp, #S_FP]			@ get FP
+	ldr	r1, [r0, #-8]			@ based on FP get old SP
+	str	r1, [sp, #S_SP]			@ store old SP over current SP
+	ldr	r1, [r0, #-12]			@ based on FP get old FP
+	str	r1, [sp, #S_FP]			@ store old FP over current FP
+#endif
+
 #ifdef CONFIG_FUNCTION_GRAPH_TRACER
 	.globl ftrace_graph_regs_call
 ftrace_graph_regs_call:
 	mov	r0, r0
 #endif
 
+	.global ftrace_regs_caller_end
+ftrace_regs_caller_end:
 	@ pop saved regs
 	ldmia   sp!, {r0-r12}			@ restore r0 through r12
 	ldr	ip, [sp, #8]			@ restore PC

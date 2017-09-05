@@ -6,9 +6,16 @@
 #define ARCH_SUPPORTS_FTRACE_OPS 1
 #endif
 
+#ifdef CONFIG_DYNAMIC_FTRACE_WITH_REGS
+#define ARCH_SUPPORTS_FTRACE_OPS 1
+#endif
+
 #ifdef CONFIG_FUNCTION_TRACER
 #define MCOUNT_ADDR		((unsigned long)(__gnu_mcount_nc))
 #define MCOUNT_INSN_SIZE	4 /* sizeof mcount call */
+
+/* Maximum mcount call offset from beginning of function */
+#define MCOUNT_CALL_OFFSET_MAX	24
 
 #ifndef __ASSEMBLY__
 extern void mcount(void);
