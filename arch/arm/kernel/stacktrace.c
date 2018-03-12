@@ -168,4 +168,12 @@ void save_stack_trace(struct stack_trace *trace)
 	__save_stack_trace(current, trace, 0);
 }
 EXPORT_SYMBOL_GPL(save_stack_trace);
+
+int save_stack_trace_tsk_reliable(struct task_struct *tsk,
+					 struct stack_trace *trace)
+{
+	__save_stack_trace(tsk, trace, 1);
+	return 0;
+}
+EXPORT_SYMBOL(save_stack_trace_tsk_reliable);
 #endif
