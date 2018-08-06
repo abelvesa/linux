@@ -59,6 +59,18 @@ struct stm32_ops {
 	u32 syscfg_eth_mask;
 };
 
+#define MII_PHY_SEL_MASK	23
+#define SYSCFG_BASE		0x40013800
+#define SYSCFG_PMC		(SYSCFG_BASE + 0x04)
+
+static void stm32_eth_phy_sel(int interface)
+{
+	u32 val;
+
+	val = (interface == PHY_INTERFACE_MODE_MII) ? 0 : 1;
+	writel(val << MII_PHY_SEL_MASK, SYSCFG_PMC);
+}
+
 static int stm32_dwmac_init(struct plat_stmmacenet_data *plat_dat)
 {
 	struct stm32_dwmac *dwmac = plat_dat->bsp_priv;
@@ -69,6 +81,8 @@ static int stm32_dwmac_init(struct plat_stmmacenet_data *plat_dat)
 		if (ret)
 			return ret;
 	}
+
+	stm32_eth_phy_sel(plat_dat->interface);
 
 	ret = clk_prepare_enable(dwmac->clk_tx);
 	if (ret)
