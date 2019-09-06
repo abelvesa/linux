@@ -50,6 +50,9 @@ struct imx_pll14xx_clk {
 	int flags;
 };
 
+extern struct imx_pll14xx_clk imx_1416x_pll;
+extern struct imx_pll14xx_clk imx_1443x_pll;
+
 #define imx_clk_busy_divider(name, parent_name, reg, shift, width, busy_reg, busy_shift) \
 	imx_clk_hw_busy_divider(name, parent_name, reg, shift, width, busy_reg, busy_shift)->clk
 
