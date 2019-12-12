@@ -122,11 +122,15 @@ extern struct imx_pll14xx_clk imx_1443x_dram_pll;
 #define imx_clk_mux(name, reg, shift, width, parents, num_parents) \
 	imx_clk_hw_mux(name, reg, shift, width, parents, num_parents)->clk
 
-struct clk *imx_clk_pll14xx(const char *name, const char *parent_name,
-		 void __iomem *base, const struct imx_pll14xx_clk *pll_clk);
+#define imx_clk_pll14xx(name, parent_name, base, pll_clk) \
+	to_clk(imx_clk_hw_pll14xx(name, parent_name, base, pll_clk))
 
 struct clk *imx_clk_pllv1(enum imx_pllv1_type type, const char *name,
 		const char *parent, void __iomem *base);
+
+struct clk_hw *imx_clk_hw_pll14xx(const char *name, const char *parent_name,
+				  void __iomem *base,
+				  const struct imx_pll14xx_clk *pll_clk);
 
 struct clk *imx_clk_pllv2(const char *name, const char *parent,
 		void __iomem *base);
