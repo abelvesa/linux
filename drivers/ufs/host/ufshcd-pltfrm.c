@@ -8,6 +8,8 @@
  *	Vinayak Holikatti <h.vinayak@samsung.com>
  */
 
+#define DEBUG
+
 #include <linux/clk.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>

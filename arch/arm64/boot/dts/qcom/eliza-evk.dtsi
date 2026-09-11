@@ -136,14 +136,14 @@
 };
 
 &pcie0 {
-	status = "okay";
+//	status = "okay";
 };
 
 &pcie0_phy {
 	vdda-phy-supply = <&vreg_l1k>;
 	vdda-pll-supply = <&vreg_l3k>;
 
-	status = "okay";
+//	status = "okay";
 };
 
 &pcie0_port0 {
@@ -172,7 +172,7 @@
 	pinctrl-1 = <&sdc2_sleep>, <&sd_cd>;
 	pinctrl-names = "default", "sleep";
 
-	status = "okay";
+//	status = "okay";
 };
 
 &tlmm {
@@ -194,14 +194,14 @@
 		    <0x500 &apps_smmu 0x1407 0x0 0x1>,
 		    <0x501 &apps_smmu 0x1408 0x0 0x1>;
 
-	status = "okay";
+//	status = "okay";
 };
 
 &pcie1_phy {
 	vdda-phy-supply = <&vreg_l1k>;
 	vdda-pll-supply = <&vreg_l3k>;
 
-	status = "okay";
+//	status = "okay";
 };
 
 &pcie1_port0 {
@@ -275,14 +275,14 @@
 };
 
 &usb {
-	status = "okay";
+//	status = "okay";
 };
 
 &usb_dp_qmpphy {
 	vdda-phy-supply = <&vreg_l3g>;
 	vdda-pll-supply = <&vreg_l7k>;
 
-	status = "okay";
+//	status = "okay";
 };
 
 &usb_dp_qmpphy_out {
@@ -298,12 +298,12 @@
 	vdda12-supply = <&vreg_l4b>;
 
 	phys = <&pm7550ba_eusb2_repeater>;
-
+//
 	status = "okay";
 };
 
 &uart5 {
-	status = "okay";
+//	status = "okay";
 
 	port {
 		uart5_ep: endpoint {

@@ -3,6 +3,8 @@
  * Copyright (c) 2013-2016, Linux Foundation. All rights reserved.
  */
 
+#define DEBUG
+
 #include <linux/acpi.h>
 #include <linux/clk.h>
 #include <linux/cleanup.h>
@@ -2973,6 +2975,7 @@ static int ufs_qcom_probe(struct platform_device *pdev)
 	const struct ufs_hba_variant_ops *vops;
 	const struct ufs_qcom_drvdata *drvdata = device_get_match_data(dev);
 
+	pr_err("	DBG: %s %d: \n", __func__, __LINE__);
 	if (drvdata && drvdata->vops)
 		vops = drvdata->vops;
 	else
@@ -2980,6 +2983,7 @@ static int ufs_qcom_probe(struct platform_device *pdev)
 
 	/* Perform generic probe */
 	err = ufshcd_pltfrm_init(pdev, vops);
+	pr_err("	DBG: %s %d: \n", __func__, __LINE__);
 	if (err)
 		return dev_err_probe(dev, err, "ufshcd_pltfrm_init() failed\n");
 
