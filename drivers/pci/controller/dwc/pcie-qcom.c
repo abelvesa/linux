@@ -2485,7 +2485,7 @@ static void qcom_pcie_shutdown(struct platform_device *pdev)
 	pm_runtime_disable(&pdev->dev);
 }
 
-static int qcom_pcie_suspend_noirq(struct device *dev)
+static int qcom_pcie_suspend(struct device *dev, bool force)
 {
 	struct qcom_pcie *pcie;
 	int ret = 0;
@@ -2498,7 +2498,7 @@ static int qcom_pcie_suspend_noirq(struct device *dev)
 	if (!pcie)
 		return 0;
 
-	ret = dw_pcie_suspend_noirq(pcie->pci, false);
+	ret = dw_pcie_suspend_noirq(pcie->pci, force);
 	if (ret)
 		return ret;
 
@@ -2545,6 +2545,22 @@ static int qcom_pcie_suspend_noirq(struct device *dev)
 		}
 	}
 	return ret;
+}
+
+static int qcom_pcie_suspend_noirq(struct device *dev)
+{
+	return qcom_pcie_suspend(dev, false);
+}
+
+/*
+ * A hibernation image is resumed after a power cycle, by a kernel that may
+ * not have brought this controller up. Power the controller down even if a
+ * device below it cannot go to D3cold, so that the image never holds a
+ * controller that is running. Thaw and restore bring it up again.
+ */
+static int qcom_pcie_freeze_noirq(struct device *dev)
+{
+	return qcom_pcie_suspend(dev, true);
 }
 
 static int qcom_pcie_resume_noirq(struct device *dev)
@@ -2663,7 +2679,12 @@ DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_QCOM, 0x1000, qcom_fixup_class);
 DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_QCOM, 0x1001, qcom_fixup_class);
 
 static const struct dev_pm_ops qcom_pcie_pm_ops = {
-	NOIRQ_SYSTEM_SLEEP_PM_OPS(qcom_pcie_suspend_noirq, qcom_pcie_resume_noirq)
+	.suspend_noirq = pm_sleep_ptr(qcom_pcie_suspend_noirq),
+	.resume_noirq = pm_sleep_ptr(qcom_pcie_resume_noirq),
+	.freeze_noirq = pm_sleep_ptr(qcom_pcie_freeze_noirq),
+	.thaw_noirq = pm_sleep_ptr(qcom_pcie_resume_noirq),
+	.poweroff_noirq = pm_sleep_ptr(qcom_pcie_suspend_noirq),
+	.restore_noirq = pm_sleep_ptr(qcom_pcie_resume_noirq),
 };
 
 static struct platform_driver qcom_pcie_driver = {
