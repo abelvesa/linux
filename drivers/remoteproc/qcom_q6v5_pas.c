@@ -22,6 +22,7 @@
 #include <linux/platform_device.h>
 #include <linux/pm_domain.h>
 #include <linux/pm_runtime.h>
+#include <linux/suspend.h>
 #include <linux/firmware/qcom/qcom_pas.h>
 #include <linux/firmware/qcom/qcom_scm.h>
 #include <linux/regulator/consumer.h>
@@ -146,6 +147,8 @@ struct qcom_pas {
 	struct qcom_pas_context *dtb_pas_ctx;
 
 	struct qmi_tmd_client *tmd_inst;
+
+	struct list_head node;
 };
 
 static void qcom_pas_segment_dump(struct rproc *rproc,
@@ -920,6 +923,139 @@ static int qcom_pas_setup_tmd(struct qcom_pas *pas, const struct qcom_pas_data *
 	return 0;
 }
 
+static LIST_HEAD(qcom_pas_list);
+static DEFINE_MUTEX(qcom_pas_list_lock);
+
+struct qcom_pas_unbound {
+	struct list_head node;
+	struct device *dev;
+};
+
+static LIST_HEAD(qcom_pas_unbound_list);
+
+/* Platform devices that had a driver before the remote processors were unbound */
+static LIST_HEAD(qcom_pas_rebind_list);
+
+static int qcom_pas_note_bound(struct device *dev, void *data)
+{
+	struct qcom_pas_unbound *r;
+
+	if (!dev->driver)
+		return 0;
+
+	r = kzalloc_obj(*r);
+	if (!r)
+		return 0;
+
+	r->dev = get_device(dev);
+	list_add_tail(&r->node, &qcom_pas_rebind_list);
+
+	return 0;
+}
+
+/*
+ * A hibernation image is restored after a power cycle, by a kernel that may
+ * have started or attached to the remote processors itself. Neither the
+ * processors nor the shared memory, smp2p and GLINK state they use match what
+ * the image remembers, so make sure the image holds no session with a remote
+ * processor.
+ *
+ * Before the image is created, and before the kernel that loads it jumps into
+ * it, unbind the remote processors. That stops the ones we started, after
+ * unbinding the devices that depend on what they provide, like the audio
+ * macros using the clocks of the ADSP. Detach from the ones we attached to
+ * first, so that they are not stopped. Once the restored kernel runs again,
+ * bind them again, which also probes their consumers again.
+ */
+static void qcom_pas_hibernation_unbind(void)
+{
+	struct qcom_pas_unbound *unbound, *r, *tmp;
+	struct qcom_pas *pas;
+
+	/* Remember which platform devices have a driver now */
+	bus_for_each_dev(&platform_bus_type, NULL, NULL, qcom_pas_note_bound);
+
+	scoped_guard(mutex, &qcom_pas_list_lock) {
+		list_for_each_entry(pas, &qcom_pas_list, node) {
+			unbound = kzalloc_obj(*unbound);
+			if (!unbound)
+				break;
+
+			if (pas->rproc->state == RPROC_ATTACHED)
+				rproc_detach(pas->rproc);
+
+			unbound->dev = get_device(pas->dev);
+			list_add_tail(&unbound->node, &qcom_pas_unbound_list);
+		}
+	}
+
+	list_for_each_entry(unbound, &qcom_pas_unbound_list, node)
+		device_release_driver(unbound->dev);
+
+	/* Keep only those which lost their driver along the way */
+	list_for_each_entry_safe(r, tmp, &qcom_pas_rebind_list, node) {
+		if (!r->dev->driver)
+			continue;
+		list_del(&r->node);
+		put_device(r->dev);
+		kfree(r);
+	}
+}
+
+static void qcom_pas_hibernation_bind(void)
+{
+	struct qcom_pas_unbound *unbound, *tmp;
+	int ret;
+
+	list_for_each_entry_safe(unbound, tmp, &qcom_pas_unbound_list, node) {
+		ret = device_attach(unbound->dev);
+		if (ret < 0)
+			dev_err(unbound->dev, "failed to bind after hibernation: %d\n",
+				ret);
+
+		list_del(&unbound->node);
+		put_device(unbound->dev);
+		kfree(unbound);
+	}
+
+	/*
+	 * Binding the remote processors again binds the devices depending on
+	 * them again as well, but not necessarily those which depend on those
+	 * in turn: a device unbound before its supplier through a link of its
+	 * own, like a SoundWire controller using the clocks of a LPASS macro,
+	 * is not probed again when the supplier comes back. Give every device
+	 * that lost its driver another chance.
+	 */
+	list_for_each_entry_safe(unbound, tmp, &qcom_pas_rebind_list, node) {
+		if (!unbound->dev->driver && device_attach(unbound->dev) < 0)
+			dev_warn(unbound->dev, "failed to bind after hibernation\n");
+		list_del(&unbound->node);
+		put_device(unbound->dev);
+		kfree(unbound);
+	}
+}
+
+static int qcom_pas_pm_notify(struct notifier_block *nb, unsigned long action,
+			      void *data)
+{
+	switch (action) {
+	case PM_HIBERNATION_PREPARE:
+	case PM_RESTORE_PREPARE:
+		qcom_pas_hibernation_unbind();
+		break;
+	case PM_POST_HIBERNATION:
+	case PM_POST_RESTORE:
+		qcom_pas_hibernation_bind();
+		break;
+	}
+
+	return NOTIFY_DONE;
+}
+
+static struct notifier_block qcom_pas_pm_nb = {
+	.notifier_call = qcom_pas_pm_notify,
+};
+
 static int qcom_pas_probe(struct platform_device *pdev)
 {
 	const struct qcom_pas_data *desc;
@@ -1051,6 +1187,9 @@ static int qcom_pas_probe(struct platform_device *pdev)
 	if (ret)
 		goto remove_setup_tmd;
 
+	scoped_guard(mutex, &qcom_pas_list_lock)
+		list_add_tail(&pas->node, &qcom_pas_list);
+
 	node = of_get_compatible_child(pdev->dev.of_node, "qcom,bam-dmux");
 	pas->bam_dmux = of_platform_device_create(node, NULL, &pdev->dev);
 	of_node_put(node);
@@ -1082,6 +1221,9 @@ free_rproc:
 static void qcom_pas_remove(struct platform_device *pdev)
 {
 	struct qcom_pas *pas = platform_get_drvdata(pdev);
+
+	scoped_guard(mutex, &qcom_pas_list_lock)
+		list_del(&pas->node);
 
 	if (pas->bam_dmux)
 		of_platform_device_destroy(&pas->bam_dmux->dev, NULL);
@@ -2099,6 +2241,27 @@ static struct platform_driver qcom_pas_driver = {
 	},
 };
 
-module_platform_driver(qcom_pas_driver);
+static int __init qcom_pas_init(void)
+{
+	int ret;
+
+	ret = register_pm_notifier(&qcom_pas_pm_nb);
+	if (ret)
+		return ret;
+
+	ret = platform_driver_register(&qcom_pas_driver);
+	if (ret)
+		unregister_pm_notifier(&qcom_pas_pm_nb);
+
+	return ret;
+}
+module_init(qcom_pas_init);
+
+static void __exit qcom_pas_exit(void)
+{
+	platform_driver_unregister(&qcom_pas_driver);
+	unregister_pm_notifier(&qcom_pas_pm_nb);
+}
+module_exit(qcom_pas_exit);
 MODULE_DESCRIPTION("Qualcomm Peripheral Authentication Service remoteproc driver");
 MODULE_LICENSE("GPL v2");
