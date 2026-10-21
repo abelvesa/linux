@@ -1093,7 +1093,14 @@ static int __reset_add_reset_gpio_device(struct fwnode_handle *fwnode,
 		goto err_put_fwnode;
 	}
 
-	ret = reset_create_gpio_aux_device(rgpio_dev, parent);
+	/*
+	 * The GPIO device goes away when its controller is unbound, which would
+	 * leave the reset-gpio device without a place in sysfs. Hang it off the
+	 * controller instead, which stays around and gets a new GPIO device
+	 * when it is bound again.
+	 */
+	ret = reset_create_gpio_aux_device(rgpio_dev,
+					   parent->parent ?: parent);
 	if (ret)
 		goto err_del_swnode;
 
