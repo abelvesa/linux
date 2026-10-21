@@ -1912,6 +1912,14 @@ static int qcom_swrm_probe(struct platform_device *pdev)
 
 	clk_prepare_enable(ctrl->hclk);
 
+	/*
+	 * Start from a clean controller. It is not reset when it was in use
+	 * before, like when the driver is bound again, and stale commands and
+	 * responses in its FIFOs garble the enumeration of the peripherals.
+	 */
+	ctrl->reg_write(ctrl, SWRM_COMP_SW_RESET, 0x01);
+	usleep_range(100, 105);
+
 	ctrl->dev = dev;
 	dev_set_drvdata(&pdev->dev, ctrl);
 	mutex_init(&ctrl->port_lock);
