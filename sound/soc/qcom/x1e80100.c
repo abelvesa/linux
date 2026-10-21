@@ -178,6 +178,19 @@ static void x1e80100_add_be_ops(struct snd_soc_card *card)
 	}
 }
 
+/*
+ * The card is torn down whenever one of its components goes away, which frees
+ * the jacks with the sound card. Set them up again when it is bound again.
+ */
+static int x1e80100_snd_remove(struct snd_soc_card *card)
+{
+	struct x1e80100_snd_data *data = snd_soc_card_get_drvdata(card);
+
+	data->jack_setup = false;
+
+	return 0;
+}
+
 static int x1e80100_platform_probe(struct platform_device *pdev)
 {
 	struct snd_soc_card *card;
@@ -195,6 +208,7 @@ static int x1e80100_platform_probe(struct platform_device *pdev)
 
 	card->owner = THIS_MODULE;
 	card->dev = dev;
+	card->remove = x1e80100_snd_remove;
 	dev_set_drvdata(dev, card);
 	snd_soc_card_set_drvdata(card, data);
 
