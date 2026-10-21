@@ -2054,23 +2054,39 @@ err_init:
 static void qcom_swrm_remove(struct platform_device *pdev)
 {
 	struct qcom_swrm_ctrl *ctrl = dev_get_drvdata(&pdev->dev);
+	bool active;
+
+	/*
+	 * The interface clock is off while runtime suspended. Do not resume
+	 * the controller for the removal: its clocks may come from a provider
+	 * that is being removed along with it, like the LPASS macros when the
+	 * ADSP goes away, and resuming would then fail and leave the clocks in
+	 * an unknown state. Just tear down what is there.
+	 */
+	pm_runtime_disable(&pdev->dev);
+	active = pm_runtime_status_suspended(&pdev->dev) ? false : true;
 
 	/* delete bus before dropping peer_ctrl; in-flight ops deref it */
 	if (!ctrl->is_dependent)
 		sdw_bus_master_delete(&ctrl->bus);
 
-	if (ctrl->is_primary && ctrl->peer_ctrl) {
+	if (active && ctrl->is_primary && ctrl->peer_ctrl) {
 		struct qcom_swrm_ctrl *peer = ctrl->peer_ctrl;
 
 		peer->reg_write(peer,
 				peer->reg_layout[SWRM_REG_INTERRUPT_CPU_EN], 0);
 		/* disable peer SWRM; releases shared SWR_CLK */
 		peer->reg_write(peer, SWRM_COMP_CFG_ADDR, 0);
-		peer->peer_ctrl = NULL;
+	}
+	if (ctrl->peer_ctrl) {
+		ctrl->peer_ctrl->peer_ctrl = NULL;
 		ctrl->peer_ctrl = NULL;
 	}
 
-	clk_disable_unprepare(ctrl->hclk);
+	pm_runtime_set_suspended(&pdev->dev);
+
+	if (active)
+		clk_disable_unprepare(ctrl->hclk);
 }
 
 static int __maybe_unused swrm_runtime_resume(struct device *dev)
