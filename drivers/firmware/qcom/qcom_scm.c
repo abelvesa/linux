@@ -3054,11 +3054,21 @@ static const struct of_device_id qcom_scm_dt_match[] = {
 };
 MODULE_DEVICE_TABLE(of, qcom_scm_dt_match);
 
+static int qcom_scm_restore_early(struct device *dev)
+{
+	return qcom_tzmem_restore();
+}
+
+static const struct dev_pm_ops qcom_scm_pm_ops = {
+	.restore_early = pm_sleep_ptr(qcom_scm_restore_early),
+};
+
 static struct platform_driver qcom_scm_driver = {
 	.driver = {
 		.name	= "qcom_scm",
 		.of_match_table = qcom_scm_dt_match,
 		.suppress_bind_attrs = true,
+		.pm = pm_sleep_ptr(&qcom_scm_pm_ops),
 	},
 	.probe = qcom_scm_probe,
 	.shutdown = qcom_scm_shutdown,

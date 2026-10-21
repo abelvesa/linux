@@ -15,6 +15,7 @@
 #include <linux/kernel.h>
 #include <linux/list.h>
 #include <linux/mm.h>
+#include <linux/mutex.h>
 #include <linux/once.h>
 #include <linux/radix-tree.h>
 #include <linux/slab.h>
@@ -33,6 +34,7 @@ struct qcom_tzmem_area {
 };
 
 struct qcom_tzmem_pool {
+	struct list_head list;
 	struct gen_pool *genpool;
 	struct list_head areas;
 	enum qcom_tzmem_policy policy;
@@ -49,6 +51,8 @@ struct qcom_tzmem_chunk {
 static struct device *qcom_tzmem_dev;
 static RADIX_TREE(qcom_tzmem_chunks, GFP_ATOMIC);
 static DEFINE_SPINLOCK(qcom_tzmem_chunks_lock);
+static LIST_HEAD(qcom_tzmem_pools);
+static DEFINE_MUTEX(qcom_tzmem_pools_lock);
 
 #ifndef CONFIG_QCOM_TZMEM_MODE_SHMBRIDGE
 
@@ -65,6 +69,11 @@ static int qcom_tzmem_init_area(struct qcom_tzmem_area *area)
 static void qcom_tzmem_cleanup_area(struct qcom_tzmem_area *area)
 {
 
+}
+
+int qcom_tzmem_restore(void)
+{
+	return 0;
 }
 
 #else
@@ -191,6 +200,52 @@ static void qcom_tzmem_cleanup_area(struct qcom_tzmem_area *area)
 	kfree(handle);
 }
 
+/**
+ * qcom_tzmem_restore() - Create the SHM bridges of all pools again.
+ *
+ * A hibernation image is restored after a power cycle, so the TrustZone knows
+ * nothing about the SHM bridges created before the image was taken. Enable
+ * SHM bridge again and create a bridge for every area of every pool.
+ *
+ * Must be called during a restore from hibernation, when nothing else can
+ * add areas to the pools.
+ *
+ * Return: 0 on success, negative errno on failure.
+ */
+int qcom_tzmem_restore(void)
+{
+	struct qcom_tzmem_area *area;
+	struct qcom_tzmem_pool *pool;
+	int ret;
+
+	if (!qcom_tzmem_using_shm_bridge)
+		return 0;
+
+	ret = qcom_scm_shm_bridge_enable(qcom_tzmem_dev);
+	if (ret) {
+		dev_err(qcom_tzmem_dev, "failed to enable SHM bridge: %d\n", ret);
+		return ret;
+	}
+
+	guard(mutex)(&qcom_tzmem_pools_lock);
+
+	list_for_each_entry(pool, &qcom_tzmem_pools, list) {
+		list_for_each_entry(area, &pool->areas, list) {
+			ret = qcom_tzmem_shm_bridge_create(area->paddr,
+							   area->size,
+							   area->priv);
+			if (ret) {
+				dev_err(qcom_tzmem_dev,
+					"failed to create SHM bridge for %pad: %d\n",
+					&area->paddr, ret);
+				return ret;
+			}
+		}
+	}
+
+	return 0;
+}
+
 #endif /* CONFIG_QCOM_TZMEM_MODE_SHMBRIDGE */
 
 static int qcom_tzmem_pool_add_memory(struct qcom_tzmem_pool *pool,
@@ -276,6 +331,7 @@ qcom_tzmem_pool_new(const struct qcom_tzmem_pool_config *config)
 	pool->policy = config->policy;
 	pool->increment = config->increment;
 	pool->max_size = config->max_size;
+	INIT_LIST_HEAD(&pool->list);
 	INIT_LIST_HEAD(&pool->areas);
 	spin_lock_init(&pool->lock);
 
@@ -287,6 +343,9 @@ qcom_tzmem_pool_new(const struct qcom_tzmem_pool_config *config)
 			return ERR_PTR(ret);
 		}
 	}
+
+	scoped_guard(mutex, &qcom_tzmem_pools_lock)
+		list_add_tail(&pool->list, &qcom_tzmem_pools);
 
 	return_ptr(pool);
 }
@@ -311,6 +370,9 @@ void qcom_tzmem_pool_free(struct qcom_tzmem_pool *pool)
 
 	if (!pool)
 		return;
+
+	scoped_guard(mutex, &qcom_tzmem_pools_lock)
+		list_del(&pool->list);
 
 	scoped_guard(spinlock_irqsave, &qcom_tzmem_chunks_lock) {
 		radix_tree_for_each_slot(slot, &qcom_tzmem_chunks, &iter, 0) {
