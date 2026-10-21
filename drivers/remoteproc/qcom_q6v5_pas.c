@@ -606,6 +606,20 @@ disable_running:
 	return ret;
 }
 
+static int qcom_pas_detach(struct rproc *rproc)
+{
+	struct qcom_pas *pas = rproc->priv;
+
+	/*
+	 * Nothing to tell the remote processor, it keeps running. Just make
+	 * sure its watchdog and fatal interrupts are no longer treated as a
+	 * crash of a processor we are attached to.
+	 */
+	pas->q6v5.running = false;
+
+	return 0;
+}
+
 static void qcom_pas_coredump(struct rproc *rproc)
 {
 	struct qcom_pas *pas = rproc->priv;
@@ -628,6 +642,7 @@ static const struct rproc_ops qcom_pas_ops = {
 	.load = qcom_pas_load,
 	.panic = qcom_pas_panic,
 	.attach = qcom_pas_attach,
+	.detach = qcom_pas_detach,
 	.coredump = qcom_pas_coredump,
 };
 
@@ -641,6 +656,7 @@ static const struct rproc_ops qcom_pas_minidump_ops = {
 	.panic = qcom_pas_panic,
 	.coredump = qcom_pas_minidump,
 	.attach = qcom_pas_attach,
+	.detach = qcom_pas_detach,
 };
 
 static int qcom_pas_init_clock(struct qcom_pas *pas)
