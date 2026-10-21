@@ -1617,6 +1617,25 @@ static const struct snd_soc_component_driver qcom_swrm_dai_component = {
 	.name = "soundwire",
 };
 
+/*
+ * The DAI names end up in the DAI links of the sound card, which may outlive
+ * this controller being unbound, so they must not be freed with it.
+ */
+#define QCOM_SWRM_MAX_DAIS	64
+
+static const char *qcom_swrm_dai_name(int i)
+{
+	static const char *names[QCOM_SWRM_MAX_DAIS];
+	static DEFINE_MUTEX(lock);
+
+	guard(mutex)(&lock);
+
+	if (!names[i])
+		names[i] = kasprintf(GFP_KERNEL, "SDW Pin%d", i);
+
+	return names[i];
+}
+
 static int qcom_swrm_register_dais(struct qcom_swrm_ctrl *ctrl)
 {
 	int num_dais = ctrl->num_dout_ports + ctrl->num_din_ports;
@@ -1629,13 +1648,16 @@ static int qcom_swrm_register_dais(struct qcom_swrm_ctrl *ctrl)
 	if (!ctrl->sruntime)
 		return -ENOMEM;
 
+	if (num_dais > QCOM_SWRM_MAX_DAIS)
+		return -EINVAL;
+
 	/* PDM dais are only tested for now */
 	dais = devm_kcalloc(dev, num_dais, sizeof(*dais), GFP_KERNEL);
 	if (!dais)
 		return -ENOMEM;
 
 	for (i = 0; i < num_dais; i++) {
-		dais[i].name = devm_kasprintf(dev, GFP_KERNEL, "SDW Pin%d", i);
+		dais[i].name = qcom_swrm_dai_name(i);
 		if (!dais[i].name)
 			return -ENOMEM;
 
