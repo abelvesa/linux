@@ -36,6 +36,13 @@ static struct sdw_driver wcd9378_sdw_driver = {
 	.driver = {
 		.name	= "wcd9378",
 		.pm	= pm_ptr(&wcd9378_sdw_pm_ops),
+		/*
+		 * Probing waits for the codec to attach, which needs the bus
+		 * to run. The controller only starts the bus after adding it,
+		 * which probes us synchronously if this driver is loaded
+		 * already, like when the controller is bound again.
+		 */
+		.probe_type = PROBE_PREFER_ASYNCHRONOUS,
 	},
 	.probe		= wcd9378_sdca_probe,
 	.remove		= wcd9378_sdca_remove,
