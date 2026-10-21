@@ -2309,6 +2309,131 @@ static int gpi_probe(struct platform_device *pdev)
 	return ret;
 }
 
+/* tear down what the hardware may still have allocated for a channel */
+static void gpi_restore_teardown_chan(struct gchan *gchan)
+{
+	struct gpii *gpii = gchan->gpii;
+	u32 state;
+
+	state = gpi_read_reg(gpii, gchan->ch_cntxt_base_reg + CNTXT_0_CONFIG);
+	state = FIELD_GET(GPII_n_CH_k_CNTXT_0_CHSTATE, state);
+
+	switch (state) {
+	case CH_STATE_STARTED:
+		gpi_send_cmd(gpii, gchan, GPI_CH_CMD_STOP);
+		fallthrough;
+	case CH_STATE_STOPPED:
+	case CH_STATE_STOP_IN_PROC:
+	case CH_STATE_ERROR:
+		gpi_send_cmd(gpii, gchan, GPI_CH_CMD_RESET);
+		fallthrough;
+	case CH_STATE_ALLOCATED:
+		gpi_send_cmd(gpii, gchan, GPI_CH_CMD_DE_ALLOC);
+		break;
+	default:
+		break;
+	}
+}
+
+static void gpi_restore_reset_ring(struct gpi_ring *ring)
+{
+	memset(ring->base, 0, ring->len);
+	ring->rp = ring->base;
+	ring->wp = ring->base;
+}
+
+/*
+ * A hibernation image holds the software view of every GPII in use: the
+ * rings and their read/write pointers. The hardware it is restored on has
+ * either been reset by the firmware, after a power cycle, or kept running
+ * by the kernel that loaded the image, so its channel and event ring
+ * contexts do not match that view any more. Tear down whatever the
+ * hardware still has and program the GPII again with the rings recorded
+ * in the image.
+ */
+static void gpi_restore_gpii(struct gpii *gpii)
+{
+	struct device *dev = gpii->gpi_dev->dev;
+	LIST_HEAD(list);
+	u32 state;
+	int i, ret;
+
+	mutex_lock(&gpii->ctrl_lock);
+
+	if (gpii->pm_state != ACTIVE_STATE)
+		goto unlock;
+
+	for (i = 0; i < MAX_CHANNELS_PER_GPII; i++)
+		gpi_restore_teardown_chan(&gpii->gchan[i]);
+
+	state = gpi_read_reg(gpii, gpii->ev_cntxt_base_reg + CNTXT_0_CONFIG);
+	if (FIELD_GET(GPII_n_EV_k_CNTXT_0_CHSTATE, state) == EV_STATE_ALLOCATED)
+		gpi_send_cmd(gpii, NULL, GPI_EV_CMD_DEALLOC);
+
+	write_lock_irq(&gpii->pm_lock);
+	gpii->pm_state = PREPARE_HARDWARE;
+	for (i = 0; i < MAX_CHANNELS_PER_GPII; i++) {
+		struct gchan *gchan = &gpii->gchan[i];
+
+		gchan->pm_state = CONFIG_STATE;
+		gpi_restore_reset_ring(&gchan->ch_ring);
+
+		spin_lock(&gchan->vc.lock);
+		vchan_get_all_descriptors(&gchan->vc, &list);
+		spin_unlock(&gchan->vc.lock);
+	}
+	gpi_restore_reset_ring(&gpii->ev_ring);
+	write_unlock_irq(&gpii->pm_lock);
+
+	vchan_dma_desc_free_list(&gpii->gchan[0].vc, &list);
+
+	ret = gpi_config_interrupts(gpii, DEFAULT_IRQ_SETTINGS, 0);
+	if (ret)
+		goto err;
+
+	ret = gpi_alloc_ev_chan(gpii);
+	if (ret)
+		goto err;
+
+	for (i = 0; i < MAX_CHANNELS_PER_GPII; i++) {
+		ret = gpi_alloc_chan(&gpii->gchan[i], true);
+		if (ret)
+			goto err;
+	}
+
+	for (i = 0; i < MAX_CHANNELS_PER_GPII; i++) {
+		ret = gpi_start_chan(&gpii->gchan[i]);
+		if (ret)
+			goto err;
+	}
+
+	goto unlock;
+
+err:
+	dev_err(dev, "failed to restore gpii %u: %d\n", gpii->gpii_id, ret);
+unlock:
+	mutex_unlock(&gpii->ctrl_lock);
+}
+
+static int __maybe_unused gpi_restore_early(struct device *dev)
+{
+	struct gpi_dev *gpi_dev = dev_get_drvdata(dev);
+	int i;
+
+	for (i = 0; i < gpi_dev->max_gpii; i++) {
+		if (!((1 << i) & gpi_dev->gpii_mask))
+			continue;
+
+		gpi_restore_gpii(&gpi_dev->gpiis[i]);
+	}
+
+	return 0;
+}
+
+static const struct dev_pm_ops gpi_pm_ops = {
+	.restore_early = pm_sleep_ptr(gpi_restore_early),
+};
+
 static const struct of_device_id gpi_of_match[] = {
 	{ .compatible = "qcom,sdm845-gpi-dma", .data = (void *)0x0 },
 	{ .compatible = "qcom,sm6350-gpi-dma", .data = (void *)0x10000 },
@@ -2331,6 +2456,7 @@ static struct platform_driver gpi_driver = {
 	.driver = {
 		.name = KBUILD_MODNAME,
 		.of_match_table = gpi_of_match,
+		.pm = pm_sleep_ptr(&gpi_pm_ops),
 	},
 };
 
