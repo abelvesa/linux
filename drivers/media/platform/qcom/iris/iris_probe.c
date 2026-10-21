@@ -614,9 +614,38 @@ exit:
 	return ret;
 }
 
+/*
+ * A hibernation image is restored after a power cycle, by a kernel that may
+ * have loaded the firmware itself. Neither the firmware in memory nor its
+ * authentication by the TrustZone survive that, so the image must not hold an
+ * initialized core. Unload the firmware before the image is created, and
+ * before the kernel that loads it jumps into it. The next session loads it
+ * again.
+ */
+static int __maybe_unused iris_pm_freeze(struct device *dev)
+{
+	struct iris_core *core = dev_get_drvdata(dev);
+
+	scoped_guard(mutex, &core->lock) {
+		if (!list_empty(&core->instances)) {
+			dev_err(dev, "cannot hibernate with open sessions\n");
+			return -EBUSY;
+		}
+	}
+
+	cancel_delayed_work_sync(&core->sys_error_handler);
+	iris_core_deinit(core);
+
+	return pm_runtime_force_suspend(dev);
+}
+
 static const struct dev_pm_ops iris_pm_ops = {
-	SET_SYSTEM_SLEEP_PM_OPS(pm_runtime_force_suspend,
-				pm_runtime_force_resume)
+	.suspend = pm_sleep_ptr(pm_runtime_force_suspend),
+	.resume = pm_sleep_ptr(pm_runtime_force_resume),
+	.freeze = pm_sleep_ptr(iris_pm_freeze),
+	.thaw = pm_sleep_ptr(pm_runtime_force_resume),
+	.poweroff = pm_sleep_ptr(pm_runtime_force_suspend),
+	.restore = pm_sleep_ptr(pm_runtime_force_resume),
 	SET_RUNTIME_PM_OPS(iris_pm_suspend, iris_pm_resume, NULL)
 };
 
