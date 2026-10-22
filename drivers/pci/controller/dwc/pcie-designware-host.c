@@ -1303,8 +1303,14 @@ stop_link:
 	 * if PME is supported from D3cold, query the pwrctrl core and skip
 	 * power off only if device supports PME from D3cold and Vaux is
 	 * not supported.
+	 *
+	 * None of that applies when the caller forces the link down, for a
+	 * shutdown or a hibernation: nothing will wake the system up through
+	 * this link, and a device left powered keeps its link state across
+	 * the power cycle, which can keep the next kernel from training the
+	 * link at all.
 	 */
-	pci->pp.skip_pwrctrl_off = pme_capable;
+	pci->pp.skip_pwrctrl_off = pme_capable && !force;
 	dw_pcie_stop_link(pci);
 	if (pci->pp.ops->deinit)
 		pci->pp.ops->deinit(&pci->pp);
