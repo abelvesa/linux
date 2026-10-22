@@ -1701,16 +1701,16 @@ static int msm_pinctrl_restore_noirq(struct device *dev)
 			msm_writel_intr_target(s->intr_target, pctrl, g);
 
 		/*
-		 * Changing the configuration can latch an interrupt, so write it
-		 * with the interrupt disabled and clear the status before the
-		 * interrupt is enabled again. One that is latched with the
-		 * configuration unchanged is a real one.
+		 * Write the configuration with the interrupt disabled and clear
+		 * the status before the interrupt is enabled again. Whatever
+		 * is latched comes from the kernel that loaded the image, or
+		 * from changing the configuration, not from anything the
+		 * restored kernel can match a handler to, and a level
+		 * interrupt the device still asserts fires again anyway.
 		 */
-		val = msm_readl_intr_cfg(pctrl, g);
 		msm_writel_intr_cfg(s->intr_cfg & ~BIT(g->intr_enable_bit),
 				    pctrl, g);
-		if (val != s->intr_cfg)
-			msm_ack_intr_status(pctrl, g);
+		msm_ack_intr_status(pctrl, g);
 		if (s->intr_cfg & BIT(g->intr_enable_bit))
 			msm_writel_intr_cfg(s->intr_cfg, pctrl, g);
 	}
