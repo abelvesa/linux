@@ -999,7 +999,7 @@ static int i2c_hid_core_suspend(struct i2c_hid *ihid, bool force_poweroff)
 	return 0;
 }
 
-static int i2c_hid_core_resume(struct i2c_hid *ihid)
+static int i2c_hid_core_resume(struct i2c_hid *ihid, bool reset)
 {
 	struct i2c_client *client = ihid->client;
 	struct hid_device *hid = ihid->hid;
@@ -1007,6 +1007,26 @@ static int i2c_hid_core_resume(struct i2c_hid *ihid)
 
 	if (!device_may_wakeup(&client->dev))
 		i2c_hid_core_power_up(ihid);
+
+	/*
+	 * When restoring from hibernation, the device may have been left asleep
+	 * with its interrupt asserted, and reading reports from it then does
+	 * not clear the interrupt. Reset it before enabling the interrupt, which
+	 * then only signals the completion of the reset.
+	 */
+	if (reset) {
+		mutex_lock(&ihid->reset_lock);
+		ret = i2c_hid_start_hwreset(ihid);
+		enable_irq(client->irq);
+		if (ret == 0)
+			ret = i2c_hid_finish_hwreset(ihid);
+		mutex_unlock(&ihid->reset_lock);
+
+		if (ret)
+			return ret;
+
+		return hid_driver_reset_resume(hid);
+	}
 
 	enable_irq(client->irq);
 
@@ -1141,7 +1161,7 @@ static void ihid_core_panel_follower_work(struct work_struct *work)
 	if (!hid->version)
 		ret = i2c_hid_core_probe_panel_follower(ihid);
 	else
-		ret = i2c_hid_core_resume(ihid);
+		ret = i2c_hid_core_resume(ihid, false);
 
 	if (ret)
 		dev_warn(&ihid->client->dev, "Power on failed: %d\n", ret);
@@ -1392,7 +1412,7 @@ static int i2c_hid_core_pm_resume(struct device *dev)
 	if (ihid->is_panel_follower)
 		return 0;
 
-	return i2c_hid_core_resume(ihid);
+	return i2c_hid_core_resume(ihid, false);
 }
 
 static int i2c_hid_core_pm_restore(struct device *dev)
@@ -1405,7 +1425,13 @@ static int i2c_hid_core_pm_restore(struct device *dev)
 
 	i2c_hid_core_restore_sequence(ihid);
 
-	return i2c_hid_core_resume(ihid);
+	/*
+	 * The device has been through a power cycle and the session of the
+	 * kernel that loaded the hibernation image, which may have left it
+	 * asleep with an interrupt pending. Reset it rather than just powering
+	 * it on, so that it does not keep its interrupt asserted.
+	 */
+	return i2c_hid_core_resume(ihid, true);
 }
 
 const struct dev_pm_ops i2c_hid_core_pm = {
