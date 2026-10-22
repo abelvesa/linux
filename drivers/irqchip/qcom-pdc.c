@@ -18,6 +18,7 @@
 #include <linux/of_irq.h>
 #include <linux/soc/qcom/irq.h>
 #include <linux/spinlock.h>
+#include <linux/syscore_ops.h>
 #include <linux/slab.h>
 #include <linux/types.h>
 #include <linux/firmware/qcom/qcom_scm.h>
@@ -652,6 +653,59 @@ static int pdc_setup_pin_mapping(struct device *dev)
 	return 0;
 }
 
+static struct irq_domain *qcom_pdc_domain;
+
+/*
+ * A hibernation image is restored after a power cycle, and after the kernel
+ * that loaded the image has set the PDC up for its own interrupts. Set every
+ * interrupt the restored kernel has mapped up again, the way its type and
+ * enable would have, and leave all the others disabled, as probe does. This
+ * also runs after a suspend, where it only puts back what is there already.
+ */
+static void qcom_pdc_syscore_resume(void *data)
+{
+	struct irq_data *d;
+	unsigned int hwirq, virq;
+	int n, i, pin;
+
+	if (!qcom_pdc_domain)
+		return;
+
+	for (n = 0; n < pdc->region_cnt; n++) {
+		for (i = 0; i < pdc->region[n].cnt; i++) {
+			pin = i + pdc->region[n].pin_base;
+			if (pdc_pin_is_gpio(pin) && pdc->mode == PDC_SECONDARY_MODE)
+				pdc->clear_gpio(pin);
+			pdc->enable_intr(pin, false);
+		}
+	}
+
+	for (hwirq = 0; hwirq < PDC_MAX_IRQS; hwirq++) {
+		virq = irq_find_mapping(qcom_pdc_domain, hwirq);
+		if (!virq)
+			continue;
+
+		d = irq_domain_get_irq_data(qcom_pdc_domain, virq);
+		if (!d || !d->chip || !d->chip->irq_set_type)
+			continue;
+
+		d->chip->irq_set_type(d, irqd_get_trigger_type(d));
+
+		if (!irqd_irq_disabled(d) && d->chip->irq_enable)
+			d->chip->irq_enable(d);
+		if (!irqd_irq_masked(d) && !irqd_irq_disabled(d) && d->chip->irq_unmask)
+			d->chip->irq_unmask(d);
+	}
+}
+
+static const struct syscore_ops qcom_pdc_syscore_ops = {
+	.resume = qcom_pdc_syscore_resume,
+};
+
+static struct syscore qcom_pdc_syscore = {
+	.ops = &qcom_pdc_syscore_ops,
+};
+
 static int qcom_pdc_probe(struct platform_device *pdev, struct device_node *parent)
 {
 	struct irq_domain *parent_domain, *pdc_domain;
@@ -756,6 +810,9 @@ static int qcom_pdc_probe(struct platform_device *pdev, struct device_node *pare
 	}
 
 	irq_domain_update_bus_token(pdc_domain, DOMAIN_BUS_WAKEUP);
+
+	qcom_pdc_domain = pdc_domain;
+	register_syscore(&qcom_pdc_syscore);
 
 	return 0;
 }
