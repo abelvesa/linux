@@ -1794,6 +1794,7 @@ static struct platform_driver glymur_tlmm_driver = {
 	.driver = {
 		.name = "glymur-tlmm",
 		.of_match_table = glymur_tlmm_of_match,
+		.pm = &msm_pinctrl_dev_pm_ops,
 	},
 	.probe = glymur_tlmm_probe,
 };
