@@ -6518,9 +6518,19 @@ static int __maybe_unused arm_smmu_runtime_resume(struct device *dev)
 	return ret;
 }
 
+/*
+ * Runtime PM is disabled by the time the late callbacks run, so look at the
+ * runtime PM status itself. It only tells anything if runtime PM is in use
+ * for the SMMU at all though, which it is only with a power domain.
+ */
+static bool arm_smmu_rpm_suspended(struct device *dev)
+{
+	return dev->pm_domain && pm_runtime_status_suspended(dev);
+}
+
 static int __maybe_unused arm_smmu_pm_suspend(struct device *dev)
 {
-	if (pm_runtime_suspended(dev))
+	if (arm_smmu_rpm_suspended(dev))
 		return 0;
 
 	return arm_smmu_runtime_suspend(dev);
@@ -6528,14 +6538,44 @@ static int __maybe_unused arm_smmu_pm_suspend(struct device *dev)
 
 static int __maybe_unused arm_smmu_pm_resume(struct device *dev)
 {
-	if (pm_runtime_suspended(dev))
+	if (arm_smmu_rpm_suspended(dev))
 		return 0;
 
 	return arm_smmu_runtime_resume(dev);
 }
 
+/*
+ * A hibernation image is restored by another kernel, which leaves the SMMU in
+ * whatever state it used it in, possibly still enabled and with interrupts
+ * enabled. Reprogramming the interrupt configuration in that state is
+ * unpredictable, so quiesce the SMMU first, then reset it no matter what
+ * runtime PM state the image remembers.
+ */
+static int __maybe_unused arm_smmu_pm_restore(struct device *dev)
+{
+	struct arm_smmu_device *smmu = dev_get_drvdata(dev);
+
+	if (readl_relaxed(smmu->base + ARM_SMMU_CR0) & CR0_SMMUEN)
+		arm_smmu_update_gbpa(smmu, GBPA_ABORT, 0);
+
+	arm_smmu_disable_irqs(smmu);
+	arm_smmu_device_disable(smmu);
+
+	return arm_smmu_runtime_resume(dev);
+}
+
 static const struct dev_pm_ops arm_smmu_pm_ops = {
-	SET_SYSTEM_SLEEP_PM_OPS(arm_smmu_pm_suspend, arm_smmu_pm_resume)
+	/*
+	 * Masters may still do DMA from their late suspend callbacks, so only
+	 * disable the SMMU after those have run, and enable it again before
+	 * their early resume callbacks.
+	 */
+	.suspend_late = pm_sleep_ptr(arm_smmu_pm_suspend),
+	.resume_early = pm_sleep_ptr(arm_smmu_pm_resume),
+	.freeze_late = pm_sleep_ptr(arm_smmu_pm_suspend),
+	.thaw_early = pm_sleep_ptr(arm_smmu_pm_resume),
+	.poweroff_late = pm_sleep_ptr(arm_smmu_pm_suspend),
+	.restore_early = pm_sleep_ptr(arm_smmu_pm_restore),
 	SET_RUNTIME_PM_OPS(arm_smmu_runtime_suspend,
 			   arm_smmu_runtime_resume, NULL)
 };
