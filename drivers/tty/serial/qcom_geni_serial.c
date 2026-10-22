@@ -2165,10 +2165,28 @@ static const struct qcom_geni_device_data sa8255p_qcom_geni_uart_data = {
 	.set_rate = geni_se_set_perf_level,
 };
 
+/*
+ * A hibernation image is restored after a power cycle, so the serial engine
+ * has lost the setup the image remembers. Do it again when the port starts.
+ */
+static int qcom_geni_serial_restore(struct device *dev)
+{
+	struct qcom_geni_serial_port *port = dev_get_drvdata(dev);
+
+	port->setup = false;
+
+	return qcom_geni_serial_resume(dev);
+}
+
 static const struct dev_pm_ops qcom_geni_serial_pm_ops = {
 	SET_RUNTIME_PM_OPS(qcom_geni_serial_runtime_suspend,
 			   qcom_geni_serial_runtime_resume, NULL)
-	SYSTEM_SLEEP_PM_OPS(qcom_geni_serial_suspend, qcom_geni_serial_resume)
+	.suspend = pm_sleep_ptr(qcom_geni_serial_suspend),
+	.resume = pm_sleep_ptr(qcom_geni_serial_resume),
+	.freeze = pm_sleep_ptr(qcom_geni_serial_suspend),
+	.thaw = pm_sleep_ptr(qcom_geni_serial_resume),
+	.poweroff = pm_sleep_ptr(qcom_geni_serial_suspend),
+	.restore = pm_sleep_ptr(qcom_geni_serial_restore),
 };
 
 static void qcom_geni_serial_sys_shutdown(struct platform_device *pdev)
