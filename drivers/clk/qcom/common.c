@@ -7,6 +7,8 @@
 #include <linux/module.h>
 #include <linux/regmap.h>
 #include <linux/platform_device.h>
+#include <linux/pm.h>
+#include <linux/clk.h>
 #include <linux/clk-provider.h>
 #include <linux/interconnect-clk.h>
 #include <linux/pm_runtime.h>
@@ -26,6 +28,8 @@ struct qcom_cc {
 	struct clk_regmap **rclks;
 	size_t num_rclks;
 	struct dev_pm_domain_list *pd_list;
+	const struct qcom_cc_desc *desc;
+	struct regmap *regmap;
 };
 
 const
@@ -337,6 +341,10 @@ int qcom_cc_really_probe(struct device *dev,
 	if (!cc)
 		return -ENOMEM;
 
+	cc->desc = desc;
+	cc->regmap = regmap;
+	dev_set_drvdata(dev, cc);
+
 	ret = devm_pm_domain_attach_list(dev, NULL, &cc->pd_list);
 	if (ret < 0 && ret != -EEXIST)
 		return ret;
@@ -433,6 +441,46 @@ put_rpm:
 	return ret;
 }
 EXPORT_SYMBOL_GPL(qcom_cc_really_probe);
+
+/*
+ * The clock controller has been through a power cycle the clock framework
+ * knows nothing about, while the consumers still expect the rates and the
+ * enable state they have asked for before the hibernation image was created.
+ * Redo the configuration done at probe and put the clocks back into the state
+ * the framework has cached for them.
+ */
+static int qcom_cc_restore(struct device *dev)
+{
+	struct qcom_cc *cc = dev_get_drvdata(dev);
+	const struct qcom_cc_desc *desc = cc->desc;
+	int ret;
+
+	if (desc->use_rpm) {
+		ret = pm_runtime_resume_and_get(dev);
+		if (ret)
+			return ret;
+	}
+
+	if (desc->driver_data) {
+		ret = qcom_cc_clk_pll_configure(desc->driver_data, cc->regmap);
+		if (ret)
+			goto put_rpm;
+
+		qcom_cc_clk_regs_configure(dev, desc->driver_data, cc->regmap);
+	}
+
+	clk_restore_context_dev(dev);
+
+put_rpm:
+	if (desc->use_rpm)
+		pm_runtime_put_sync(dev);
+
+	return ret;
+}
+
+EXPORT_GPL_DEV_PM_OPS(qcom_cc_pm_ops) = {
+	.restore = pm_sleep_ptr(qcom_cc_restore),
+};
 
 int qcom_cc_probe(struct platform_device *pdev, const struct qcom_cc_desc *desc)
 {
