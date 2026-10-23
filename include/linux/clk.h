@@ -245,6 +245,18 @@ int clk_save_context(void);
  */
 void clk_restore_context(void);
 
+/**
+ * clk_restore_context_dev - restore the clocks of a provider after poweroff
+ * @dev: the device that registered the clocks
+ *
+ * Puts the clocks registered by @dev back into the state the framework has
+ * cached for them, after the hardware has lost its state without the
+ * framework knowing, such as when a hibernation image is restored. Meant for
+ * the hibernation restore callback of the provider, with the hardware
+ * accessible.
+ */
+void clk_restore_context_dev(struct device *dev);
+
 #else /* !CONFIG_COMMON_CLK */
 
 static inline int clk_notifier_register(struct clk *clk,
@@ -316,6 +328,8 @@ static inline int clk_save_context(void)
 }
 
 static inline void clk_restore_context(void) {}
+
+static inline void clk_restore_context_dev(struct device *dev) {}
 
 #endif /* !CONFIG_COMMON_CLK */
 
