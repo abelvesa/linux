@@ -999,6 +999,33 @@ static int i2c_hid_core_suspend(struct i2c_hid *ihid, bool force_poweroff)
 	return 0;
 }
 
+/*
+ * Read the report descriptor again and throw it away. A device that has been
+ * through a power cycle may take the host for a new one and not send any
+ * input report before the host has enumerated it, like the keyboard the EC
+ * of the Qualcomm Glymur CRD provides.
+ */
+static int i2c_hid_reread_report_descriptor(struct i2c_hid *ihid)
+{
+	unsigned int rsize = le16_to_cpu(ihid->hdesc.wReportDescLength);
+	char *rdesc;
+	int ret;
+
+	if (!rsize || rsize > HID_MAX_DESCRIPTOR_SIZE)
+		return 0;
+
+	rdesc = kzalloc(rsize, GFP_KERNEL);
+	if (!rdesc)
+		return -ENOMEM;
+
+	ret = i2c_hid_read_register(ihid,
+				    ihid->hdesc.wReportDescRegister,
+				    rdesc, rsize);
+	kfree(rdesc);
+
+	return ret;
+}
+
 static int i2c_hid_core_resume(struct i2c_hid *ihid, bool reset)
 {
 	struct i2c_client *client = ihid->client;
@@ -1022,6 +1049,10 @@ static int i2c_hid_core_resume(struct i2c_hid *ihid, bool reset)
 			ret = i2c_hid_finish_hwreset(ihid);
 		mutex_unlock(&ihid->reset_lock);
 
+		if (ret)
+			return ret;
+
+		ret = i2c_hid_reread_report_descriptor(ihid);
 		if (ret)
 			return ret;
 
