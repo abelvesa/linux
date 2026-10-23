@@ -2790,6 +2790,11 @@ static struct msm_gpu *a6xx_gpu_init(struct drm_device *dev)
 	return gpu;
 }
 
+static void a6xx_gpu_power_cycled(struct adreno_gpu *adreno_gpu)
+{
+	a6xx_gmu_power_cycled(to_a6xx_gpu(adreno_gpu));
+}
+
 const struct adreno_gpu_funcs a6xx_gpu_funcs = {
 	.base = {
 		.get_param = adreno_get_param,
@@ -2825,6 +2830,7 @@ const struct adreno_gpu_funcs a6xx_gpu_funcs = {
 	.bus_halt = a6xx_bus_clear_pending_transactions,
 	.mmu_fault_handler = a6xx_fault_handler,
 	.gx_is_on = a6xx_gmu_gx_is_on,
+	.power_cycled = a6xx_gpu_power_cycled,
 };
 
 const struct adreno_gpu_funcs a6xx_gmuwrapper_funcs = {
@@ -2897,6 +2903,7 @@ const struct adreno_gpu_funcs a7xx_gpu_funcs = {
 	.mmu_fault_handler = a6xx_fault_handler,
 	.gx_is_on = a7xx_gmu_gx_is_on,
 	.aqe_is_enabled = a6xx_aqe_is_enabled,
+	.power_cycled = a6xx_gpu_power_cycled,
 };
 
 const struct adreno_gpu_funcs a8xx_gpu_funcs = {
@@ -2929,4 +2936,5 @@ const struct adreno_gpu_funcs a8xx_gpu_funcs = {
 	.mmu_fault_handler = a8xx_fault_handler,
 	.gx_is_on = a8xx_gmu_gx_is_on,
 	.aqe_is_enabled = a6xx_aqe_is_enabled,
+	.power_cycled = a6xx_gpu_power_cycled,
 };

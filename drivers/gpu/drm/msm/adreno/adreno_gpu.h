@@ -81,6 +81,8 @@ struct adreno_gpu_funcs {
 	int (*mmu_fault_handler)(void *arg, unsigned long iova, int flags, void *data);
 	bool (*gx_is_on)(struct adreno_gpu *adreno_gpu);
 	bool (*aqe_is_enabled)(struct adreno_gpu *adreno_gpu);
+	/* The hardware has been through a power cycle since pm_suspend() */
+	void (*power_cycled)(struct adreno_gpu *adreno_gpu);
 };
 
 struct adreno_reglist {

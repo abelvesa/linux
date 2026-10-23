@@ -405,8 +405,28 @@ static int adreno_system_resume(struct device *dev)
 	return pm_runtime_force_resume(dev);
 }
 
+static int adreno_system_restore(struct device *dev)
+{
+	struct msm_gpu *gpu = dev_to_gpu(dev);
+	struct adreno_gpu *adreno_gpu;
+
+	if (!gpu)
+		return 0;
+
+	adreno_gpu = to_adreno_gpu(gpu);
+	if (adreno_gpu->funcs->power_cycled)
+		adreno_gpu->funcs->power_cycled(adreno_gpu);
+
+	return adreno_system_resume(dev);
+}
+
 static const struct dev_pm_ops adreno_pm_ops = {
-	SYSTEM_SLEEP_PM_OPS(adreno_system_suspend, adreno_system_resume)
+	.suspend = pm_sleep_ptr(adreno_system_suspend),
+	.resume = pm_sleep_ptr(adreno_system_resume),
+	.freeze = pm_sleep_ptr(adreno_system_suspend),
+	.thaw = pm_sleep_ptr(adreno_system_resume),
+	.poweroff = pm_sleep_ptr(adreno_system_suspend),
+	.restore = pm_sleep_ptr(adreno_system_restore),
 	RUNTIME_PM_OPS(adreno_runtime_suspend, adreno_runtime_resume, NULL)
 };
 

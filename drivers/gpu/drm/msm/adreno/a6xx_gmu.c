@@ -1319,6 +1319,21 @@ static int a6xx_gmu_gxpd_put(struct a6xx_gmu *gmu)
 	return 0;
 }
 
+/*
+ * A hibernation image is restored after a power cycle. The RSC then no longer
+ * waits for the wakeup request the GMU would send to it after putting it to
+ * sleep, and the request times out:
+ *
+ *   adreno_gmu 3d6c000.gmu: Unable to power on the GPU RSC
+ *
+ * Forget about the sleep, so that the next resume starts the GMU like after
+ * probe.
+ */
+void a6xx_gmu_power_cycled(struct a6xx_gpu *a6xx_gpu)
+{
+	clear_bit(GMU_STATUS_PDC_SLEEP, &a6xx_gpu->gmu.status);
+}
+
 int a6xx_gmu_resume(struct a6xx_gpu *a6xx_gpu)
 {
 	struct adreno_gpu *adreno_gpu = &a6xx_gpu->base;

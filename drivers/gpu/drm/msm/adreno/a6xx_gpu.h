@@ -286,6 +286,7 @@ static inline void a6xx_cx_misc_write(struct a6xx_gpu *a6xx_gpu, u32 reg, u32 va
 		((_ring)->id * sizeof(uint32_t)))
 
 int a6xx_gmu_resume(struct a6xx_gpu *gpu);
+void a6xx_gmu_power_cycled(struct a6xx_gpu *gpu);
 int a6xx_gmu_stop(struct a6xx_gpu *gpu);
 
 int a6xx_gmu_wait_for_idle(struct a6xx_gmu *gmu);
